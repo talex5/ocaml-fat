@@ -59,7 +59,7 @@ let connect name =
     let info = {
       read_write = true;
       sector_size = 512;
-      size_sectors = 32768L; (* 16 MiB *)
+      size_sectors = Int64.mul 0x10L 32768L ; (* 16 MiB *)
     } in
     let device = { map; info; id = name } in
     Hashtbl.replace devices name device;

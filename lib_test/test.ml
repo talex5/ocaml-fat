@@ -345,6 +345,55 @@ let test_destroy () =
         assert_failure "Items present after destroy!" in
   Lwt_main.run t
 
+let test_speed () =
+  let t =
+    let open BlockError in
+    MemoryIO.connect "" >>= fun device ->
+    let open FsError in
+    MemFS.connect device >>= fun fs ->
+    MemFS.format fs 0x1000000L >>= fun () ->
+    MemFS.create fs "/data" >>= fun () ->
+    let chunk_size = 1024 in
+    let data = Cstruct.of_string (String.create chunk_size) in
+    let iters = 3000 in
+    let t0 = Unix.gettimeofday () in
+    let ch = open_out "write.csv" in
+    Printf.fprintf ch "Size/MB,Time/s\n";
+
+    let rec loop off = function
+      | 0 -> return (`Ok ())
+      | n ->
+          Printf.fprintf ch "%f,%f\n" (float_of_int off /. 1024. /. 1024.) (Unix.gettimeofday () -. t0);
+          MemFS.write fs "/data" off data >>= fun () -> loop (off + chunk_size) (n - 1) in
+    loop 0 iters >>= fun () ->
+
+    close_out ch;
+
+    let total = chunk_size * iters in
+    let time = Unix.gettimeofday () -. t0 in
+    Printf.printf "Wrote %d bytes in %f s (%f MB/s)" total time (float_of_int total /. time /. 1024. /. 1024.);
+
+    let t0 = Unix.gettimeofday () in
+    let ch = open_out "read.csv" in
+    Printf.fprintf ch "Size/MB,Time/s\n";
+
+    let rec loop off = function
+      | 0 -> return (`Ok ())
+      | n ->
+          Printf.fprintf ch "%f,%f\n" (float_of_int off /. 1024. /. 1024.) (Unix.gettimeofday () -. t0);
+          MemFS.read fs "/data" off chunk_size >>= fun _ -> loop (off + chunk_size) (n - 1) in
+    loop 0 iters >>= fun () ->
+
+    close_out ch;
+
+    MemFS.destroy fs "/data" >>= fun () ->
+    MemFS.listdir fs "/" >>= function
+    | [] -> return ()
+    | items ->
+        List.iter (Printf.printf "Item: %s\n") items;
+        assert_failure "Items present after destroy!" in
+  Lwt_main.run t
+
 let rec allpairs xs ys = match xs with
   | [] -> []
   | x :: xs -> List.map (fun y -> x, y) ys @ (allpairs xs ys)
@@ -366,5 +415,6 @@ let _ =
       "test_listdir_subdir" >:: test_listdir_subdir;
       "test_read" >:: test_read;
       "test_destroy" >:: test_destroy;
+      "test_speed" >:: test_speed;
     ] @ write_tests in
   run_test_tt_main suite
